@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test } from 'vitest';
-import { resetMockOPFS, storageFactory } from './index';
+import { mockOPFS, resetMockOPFS, storageFactory } from './index';
 
 describe('OPFS', () => {
   beforeEach(() => {
@@ -1687,5 +1687,110 @@ describe('OPFS', () => {
 
     const root = await navigator.storage.getDirectory();
     expect(await root.queryPermission()).toBe('denied');
+  });
+
+  test('storage persist APIs resolve true', async () => {
+    const storage = storageFactory();
+
+    await expect(storage.persist()).resolves.toBe(true);
+    await expect(storage.persisted()).resolves.toBe(true);
+  });
+
+  test('storage estimate includes nested directory file usage', async () => {
+    const storage = storageFactory({ usage: 10, quota: 999 });
+    const root = await storage.getDirectory();
+    const nested = await root.getDirectoryHandle('nested', { create: true });
+    const fh = await nested.getFileHandle('nested.txt', { create: true });
+    const ws = await fh.createWritable();
+    await ws.write('abcde');
+    await ws.close();
+
+    await expect(storage.estimate()).resolves.toEqual({ usage: 15, quota: 999 });
+  });
+
+  test('write rejects unsupported raw chunks', async () => {
+    const root = await navigator.storage.getDirectory();
+    const fh = await root.getFileHandle('invalid-raw-write.txt', { create: true });
+    const stream = await fh.createWritable();
+
+    // @ts-expect-error invalid on purpose
+    await expect(stream.write(123)).rejects.toThrow('Invalid data type written to the file');
+  });
+
+  test('legacy write params accept supported data types', async () => {
+    const root = await navigator.storage.getDirectory();
+    const fh = await root.getFileHandle('legacy-supported.txt', { create: true });
+    const stream = await fh.createWritable();
+    const legacyWrite = (chunk: unknown) => stream.write(chunk as FileSystemWriteChunkType);
+
+    await legacyWrite({ data: 'A' });
+    await legacyWrite({ data: new Blob(['B']) });
+    await legacyWrite({ data: new Uint8Array([67]) });
+    await legacyWrite({ data: new TextEncoder().encode('D').buffer });
+    await stream.close();
+
+    const file = await fh.getFile();
+    expect(await file.text()).toBe('ABCD');
+  });
+
+  test('sync access handle getSize reports current size while open', async () => {
+    const root = await navigator.storage.getDirectory();
+    const fh = await root.getFileHandle('sync-size.txt', { create: true });
+    const handle = await fh.createSyncAccessHandle();
+
+    expect(handle.getSize()).toBe(0);
+    handle.write(new Uint8Array([1, 2, 3]));
+    expect(handle.getSize()).toBe(3);
+    await handle.close();
+  });
+
+  test('closed sync access handle rejects size, write, and truncate operations', async () => {
+    const root = await navigator.storage.getDirectory();
+    const fh = await root.getFileHandle('closed-sync.txt', { create: true });
+    const handle = await fh.createSyncAccessHandle();
+    await handle.close();
+
+    expect(() => handle.getSize()).toThrowError(new DOMException('The access handle is closed', 'InvalidStateError'));
+    expect(() => handle.write(new Uint8Array([1]))).toThrowError(new DOMException('The access handle is closed', 'InvalidStateError'));
+    expect(() => handle.truncate(0)).toThrowError(new DOMException('The access handle is closed', 'InvalidStateError'));
+  });
+
+  test('root directory remove rejects InvalidModificationError', async () => {
+    const root = await navigator.storage.getDirectory();
+
+    await expect(root.remove()).rejects.toThrowError(new DOMException('The root directory cannot be removed.', 'InvalidModificationError'));
+  });
+
+  test('mockOPFS preserves an existing navigator.storage object', async () => {
+    const originalStorage = globalThis.navigator.storage;
+    const storage = storageFactory({ quota: 321 });
+
+    try {
+      Object.assign(globalThis.navigator, { storage });
+
+      mockOPFS();
+
+      expect(globalThis.navigator.storage).toBe(storage);
+      await expect(globalThis.navigator.storage.estimate()).resolves.toMatchObject({ quota: 321 });
+    } finally {
+      Object.assign(globalThis.navigator, { storage: originalStorage });
+      resetMockOPFS();
+    }
+  });
+
+  test('mockOPFS creates navigator and storage when missing', async () => {
+    Object.defineProperty(globalThis, 'navigator', {
+      configurable: true,
+      value: undefined,
+      writable: true,
+    });
+    // @ts-expect-error deleting navigator is intentional for bootstrap coverage
+    delete globalThis.navigator;
+
+    mockOPFS();
+
+    expect(globalThis.navigator).toBeDefined();
+    expect(globalThis.navigator.storage).toBeDefined();
+    await expect(globalThis.navigator.storage.getDirectory()).resolves.toHaveProperty('kind', 'directory');
   });
 });
