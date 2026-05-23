@@ -1761,6 +1761,30 @@ describe('OPFS', () => {
     await expect(root.remove()).rejects.toThrowError(new DOMException('The root directory cannot be removed.', 'InvalidModificationError'));
   });
 
+  test('directory remove({ recursive: true }) deletes non-empty directories', async () => {
+    const root = await navigator.storage.getDirectory();
+    const dir = await root.getDirectoryHandle('recursive-remove', { create: true });
+    await dir.getFileHandle('child.txt', { create: true });
+
+    await dir.remove({ recursive: true });
+
+    await expect(root.getDirectoryHandle('recursive-remove')).rejects.toHaveProperty('name', 'NotFoundError');
+  });
+
+  test('root remove({ recursive: true }) clears the OPFS root', async () => {
+    const root = await navigator.storage.getDirectory();
+    await root.getFileHandle('root-file.txt', { create: true });
+    await root.getDirectoryHandle('root-dir', { create: true });
+
+    await root.remove({ recursive: true });
+
+    const entries: FileSystemHandle[] = [];
+    for await (const handle of root.values()) {
+      entries.push(handle);
+    }
+    expect(entries).toEqual([]);
+  });
+
   test('mockOPFS preserves an existing navigator.storage object', async () => {
     const originalStorage = globalThis.navigator.storage;
     const storage = storageFactory({ quota: 321 });
@@ -1790,7 +1814,104 @@ describe('OPFS', () => {
     mockOPFS();
 
     expect(globalThis.navigator).toBeDefined();
+    expect(Object.getOwnPropertyDescriptor(globalThis, 'navigator')?.configurable).toBe(true);
     expect(globalThis.navigator.storage).toBeDefined();
     await expect(globalThis.navigator.storage.getDirectory()).resolves.toHaveProperty('kind', 'directory');
+  });
+
+  test('FileSystemObserver reports created entries under an observed directory', async () => {
+    const root = await navigator.storage.getDirectory();
+    const recordsPromise = new Promise<FileSystemChangeRecord[]>((resolve) => {
+      const observer = new FileSystemObserver((records) => {
+        observer.disconnect();
+        resolve(records);
+      });
+      observer.observe(root);
+    });
+
+    await root.getFileHandle('observed.txt', { create: true });
+
+    const records = await recordsPromise;
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({
+      relativePathComponents: ['observed.txt'],
+      relativePathMovedFrom: null,
+      root,
+      type: 'appeared',
+    });
+    expect(records[0]?.changedHandle).toHaveProperty('kind', 'file');
+  });
+
+  test('FileSystemObserver reports writable stream changes as modified records', async () => {
+    const root = await navigator.storage.getDirectory();
+    const fileHandle = await root.getFileHandle('modified.txt', { create: true });
+    const recordsPromise = new Promise<FileSystemChangeRecord[]>((resolve) => {
+      const observer = new FileSystemObserver((records) => {
+        observer.disconnect();
+        resolve(records);
+      });
+      observer.observe(fileHandle);
+    });
+
+    const stream = await fileHandle.createWritable();
+    await stream.write('changed');
+    await stream.close();
+
+    const records = await recordsPromise;
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({
+      changedHandle: fileHandle,
+      relativePathComponents: [],
+      root: fileHandle,
+      type: 'modified',
+    });
+  });
+
+  test('FileSystemObserver reports sync access handle writes', async () => {
+    const root = await navigator.storage.getDirectory();
+    const fileHandle = await root.getFileHandle('sync-observed.txt', { create: true });
+    const syncHandle = await fileHandle.createSyncAccessHandle();
+    const recordsPromise = new Promise<FileSystemChangeRecord[]>((resolve) => {
+      const observer = new FileSystemObserver((records) => {
+        observer.disconnect();
+        resolve(records);
+      });
+      observer.observe(syncHandle);
+    });
+
+    syncHandle.write(new TextEncoder().encode('sync'));
+
+    const records = await recordsPromise;
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({
+      changedHandle: syncHandle,
+      relativePathComponents: [],
+      root: syncHandle,
+      type: 'modified',
+    });
+    await syncHandle.close();
+  });
+
+  test('FileSystemObserver reports deleted entries with null changedHandle', async () => {
+    const root = await navigator.storage.getDirectory();
+    await root.getFileHandle('deleted.txt', { create: true });
+    const recordsPromise = new Promise<FileSystemChangeRecord[]>((resolve) => {
+      const observer = new FileSystemObserver((records) => {
+        observer.disconnect();
+        resolve(records);
+      });
+      observer.observe(root);
+    });
+
+    await root.removeEntry('deleted.txt');
+
+    const records = await recordsPromise;
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({
+      changedHandle: null,
+      relativePathComponents: ['deleted.txt'],
+      root,
+      type: 'disappeared',
+    });
   });
 });

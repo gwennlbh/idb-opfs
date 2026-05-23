@@ -1,4 +1,5 @@
 import { fileSystemDirectoryHandleFactory } from './opfs';
+import { installFileSystemObserver } from './observer';
 import { getSizeOfDirectory } from './utils';
 import type { PermissionHandler } from './types';
 
@@ -41,6 +42,7 @@ export const mockOPFS = (): void => {
   // Navigator was added to Node.js in v21
   if (!('navigator' in globalThis)) {
     Object.defineProperty(globalThis, 'navigator', {
+      configurable: true,
       value: {},
       writable: true,
     });
@@ -48,10 +50,13 @@ export const mockOPFS = (): void => {
 
   if (!globalThis.navigator.storage) {
     Object.defineProperty(globalThis.navigator, 'storage', {
+      configurable: true,
       value: storageFactory(),
       writable: true,
     });
   }
+
+  installFileSystemObserver();
 };
 
 export const resetMockOPFS = (options: StorageFactoryOptions = {}): void => {
@@ -61,6 +66,7 @@ export const resetMockOPFS = (options: StorageFactoryOptions = {}): void => {
     requestPermission: options.requestPermission,
   });
   Object.defineProperty(globalThis.navigator.storage, 'getDirectory', {
+    configurable: true,
     value: () => root,
     writable: true,
   });

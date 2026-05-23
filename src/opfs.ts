@@ -1,4 +1,5 @@
 import { isDirectoryHandle, isFileHandle } from './utils';
+import { notifyFileSystemObservers, setFileSystemHandleMetadata } from './observer';
 import type { PermissionHandler } from './types';
 
 // This type isn't exported from lib.dom.d.ts, so we duplicate it here
@@ -15,6 +16,7 @@ type LegacyWriteParams = { data?: unknown; position?: number | null | undefined 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null;
 const isLegacyWriteParams = (v: unknown): v is LegacyWriteParams =>
   isObject(v) && !('type' in (v as Record<string, unknown>)) && 'data' in (v as Record<string, unknown>);
+const isArrayBuffer = (v: unknown): v is ArrayBuffer => Object.prototype.toString.call(v) === '[object ArrayBuffer]';
 
 interface FileData {
   content: Uint8Array;
@@ -26,6 +28,7 @@ interface FileData {
 const fileSystemFileHandleFactory = (
   name: string,
   fileData: FileData,
+  path: string[],
   exists: () => boolean,
   onRemove?: () => void,
   permissions?: { queryPermission?: PermissionHandler; requestPermission?: PermissionHandler },
@@ -37,7 +40,7 @@ const fileSystemFileHandleFactory = (
     }
   };
 
-  return {
+  const handle: FileSystemFileHandle = {
     kind: 'file',
     name,
 
@@ -45,12 +48,13 @@ const fileSystemFileHandleFactory = (
 
     requestPermission: permissions?.requestPermission ?? (async (): Promise<PermissionState> => 'granted'),
 
-    remove: async () => {
+    remove: async (_options?: FileSystemRemoveOptions) => {
       await checkPermission('readwrite');
       if (!exists()) {
         throw new DOMException('A requested file or directory could not be found at the time an operation was processed.', 'NotFoundError');
       }
       onRemove?.();
+      notifyFileSystemObservers('disappeared', null, path);
     },
 
     isSameEntry: async function (this: FileSystemFileHandle, other: FileSystemHandle): Promise<boolean> {
@@ -147,7 +151,7 @@ const fileSystemFileHandleFactory = (
           encoded = new Uint8Array(ab);
         } else if (ArrayBuffer.isView(chunk)) {
           encoded = new Uint8Array(chunk.buffer, chunk.byteOffset, chunk.byteLength);
-        } else if (chunk instanceof ArrayBuffer) {
+        } else if (isArrayBuffer(chunk)) {
           encoded = new Uint8Array(chunk);
         } else if (isLegacyWriteParams(chunk)) {
           const wp = chunk as LegacyWriteParams;
@@ -167,7 +171,7 @@ const fileSystemFileHandleFactory = (
             encoded = new Uint8Array(ab);
           } else if (ArrayBuffer.isView(data)) {
             encoded = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
-          } else if (data instanceof ArrayBuffer) {
+          } else if (isArrayBuffer(data)) {
             encoded = new Uint8Array(data);
           } else {
             throw new TypeError('Invalid data in WriteParams');
@@ -198,6 +202,7 @@ const fileSystemFileHandleFactory = (
         isClosed = true;
         fileData.content = content;
         fileData.lastModified = Date.now();
+        notifyFileSystemObservers('modified', handle, path);
       };
 
       const doAbort = async (reason?: string): Promise<void> => {
@@ -254,7 +259,7 @@ const fileSystemFileHandleFactory = (
       fileData.locked = true;
       let closed = false;
 
-      return {
+      const syncHandle: FileSystemSyncAccessHandle = {
         getSize: (): number => {
           if (closed) {
             throw new DOMException('The access handle is closed', 'InvalidStateError');
@@ -311,6 +316,7 @@ const fileSystemFileHandleFactory = (
           }
 
           fileData.lastModified = Date.now();
+          notifyFileSystemObservers('modified', syncHandle, path);
           return writeLength;
         },
 
@@ -327,6 +333,7 @@ const fileSystemFileHandleFactory = (
             fileData.content = newBuffer;
           }
           fileData.lastModified = Date.now();
+          notifyFileSystemObservers('modified', syncHandle, path);
         },
 
         flush: async (): Promise<void> => {
@@ -340,14 +347,19 @@ const fileSystemFileHandleFactory = (
           fileData.locked = false;
         },
       };
+      setFileSystemHandleMetadata(syncHandle, path);
+      return syncHandle;
     },
   };
+  setFileSystemHandleMetadata(handle, path);
+  return handle;
 };
 
 export const fileSystemDirectoryHandleFactory = (
   name: string,
   permissions?: { queryPermission?: PermissionHandler; requestPermission?: PermissionHandler },
   onRemove?: () => void,
+  path: string[] = [],
 ): FileSystemDirectoryHandle => {
   const files = new Map<string, FileSystemFileHandle>();
   const directories = new Map<string, FileSystemDirectoryHandle>();
@@ -371,17 +383,26 @@ export const fileSystemDirectoryHandleFactory = (
     queryPermission: permissions?.queryPermission ?? (async (): Promise<PermissionState> => 'granted'),
     requestPermission: permissions?.requestPermission ?? (async (): Promise<PermissionState> => 'granted'),
 
-    remove: async () => {
+    remove: async (options?: FileSystemRemoveOptions) => {
       await checkPermission('readwrite');
       if (!onRemove) {
+        if (options?.recursive) {
+          files.clear();
+          directories.clear();
+          notifyFileSystemObservers('modified', handle, path);
+          return;
+        }
         // This is usually the root directory
         throw new DOMException('The root directory cannot be removed.', 'InvalidModificationError');
       }
       // Check emptiness (standard behavior for directory.remove())
-      for await (const _ of handle.values()) {
-        throw new DOMException('The directory is not empty', 'InvalidModificationError');
+      if (!options?.recursive) {
+        for await (const _ of handle.values()) {
+          throw new DOMException('The directory is not empty', 'InvalidModificationError');
+        }
       }
       onRemove();
+      notifyFileSystemObservers('disappeared', null, path);
     },
 
     isSameEntry: async function (this: FileSystemDirectoryHandle, other: FileSystemHandle): Promise<boolean> {
@@ -399,11 +420,13 @@ export const fileSystemDirectoryHandleFactory = (
           fileSystemFileHandleFactory(
             fileName,
             { content: new Uint8Array(), lastModified: Date.now(), id: Symbol('file') },
+            [...path, fileName],
             () => files.has(fileName),
             () => files.delete(fileName),
             permissions,
           ),
         );
+        notifyFileSystemObservers('appeared', files.get(fileName) ?? null, [...path, fileName]);
       } else {
         await checkPermission('read');
       }
@@ -420,8 +443,9 @@ export const fileSystemDirectoryHandleFactory = (
       }
       if (!directories.has(dirName) && options?.create) {
         await checkPermission('readwrite');
-        const dir = fileSystemDirectoryHandleFactory(dirName, permissions, () => directories.delete(dirName));
+        const dir = fileSystemDirectoryHandleFactory(dirName, permissions, () => directories.delete(dirName), [...path, dirName]);
         directories.set(dirName, dir);
+        notifyFileSystemObservers('appeared', dir, [...path, dirName]);
       } else {
         await checkPermission('read');
       }
@@ -436,6 +460,7 @@ export const fileSystemDirectoryHandleFactory = (
       await checkPermission('readwrite');
       if (files.has(entryName)) {
         files.delete(entryName);
+        notifyFileSystemObservers('disappeared', null, [...path, entryName]);
         return;
       }
       const dir = directories.get(entryName);
@@ -449,6 +474,7 @@ export const fileSystemDirectoryHandleFactory = (
           }
         }
         directories.delete(entryName);
+        notifyFileSystemObservers('disappeared', null, [...path, entryName]);
         return;
       }
       throw new DOMException(`No such file or directory: ${entryName}`, 'NotFoundError');
@@ -517,5 +543,6 @@ export const fileSystemDirectoryHandleFactory = (
       return traverseDirectory(this, possibleDescendant);
     },
   } satisfies FileSystemDirectoryHandle;
+  setFileSystemHandleMetadata(handle, path);
   return handle;
 };
