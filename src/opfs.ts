@@ -16,6 +16,7 @@ type LegacyWriteParams = { data?: unknown; position?: number | null | undefined 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null;
 const isLegacyWriteParams = (v: unknown): v is LegacyWriteParams =>
   isObject(v) && !('type' in (v as Record<string, unknown>)) && 'data' in (v as Record<string, unknown>);
+const isArrayBuffer = (v: unknown): v is ArrayBuffer => Object.prototype.toString.call(v) === '[object ArrayBuffer]';
 
 interface FileData {
   content: Uint8Array;
@@ -150,7 +151,7 @@ const fileSystemFileHandleFactory = (
           encoded = new Uint8Array(ab);
         } else if (ArrayBuffer.isView(chunk)) {
           encoded = new Uint8Array(chunk.buffer, chunk.byteOffset, chunk.byteLength);
-        } else if (chunk instanceof ArrayBuffer) {
+        } else if (isArrayBuffer(chunk)) {
           encoded = new Uint8Array(chunk);
         } else if (isLegacyWriteParams(chunk)) {
           const wp = chunk as LegacyWriteParams;
@@ -170,7 +171,7 @@ const fileSystemFileHandleFactory = (
             encoded = new Uint8Array(ab);
           } else if (ArrayBuffer.isView(data)) {
             encoded = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
-          } else if (data instanceof ArrayBuffer) {
+          } else if (isArrayBuffer(data)) {
             encoded = new Uint8Array(data);
           } else {
             throw new TypeError('Invalid data in WriteParams');

@@ -1814,6 +1814,7 @@ describe('OPFS', () => {
     mockOPFS();
 
     expect(globalThis.navigator).toBeDefined();
+    expect(Object.getOwnPropertyDescriptor(globalThis, 'navigator')?.configurable).toBe(true);
     expect(globalThis.navigator.storage).toBeDefined();
     await expect(globalThis.navigator.storage.getDirectory()).resolves.toHaveProperty('kind', 'directory');
   });
