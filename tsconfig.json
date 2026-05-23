@@ -2,7 +2,7 @@
   "compilerOptions": {
     "outDir": "dist",
     "target": "ESNext",
-    "lib": ["DOM", "DOM.Iterable", "DOM.AsyncIterable", "ESNext", "WebWorker"],
+    "lib": ["DOM", "ESNext", "WebWorker"],
     "types": ["vitest"],
     "allowJs": false,
     "skipLibCheck": true,

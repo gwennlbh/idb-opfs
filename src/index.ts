@@ -1,4 +1,5 @@
 import { fileSystemDirectoryHandleFactory } from './opfs';
+import { installFileSystemObserver } from './observer';
 import { getSizeOfDirectory } from './utils';
 import type { PermissionHandler } from './types';
 
@@ -52,6 +53,8 @@ export const mockOPFS = (): void => {
       writable: true,
     });
   }
+
+  installFileSystemObserver();
 };
 
 export const resetMockOPFS = (options: StorageFactoryOptions = {}): void => {
