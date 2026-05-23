@@ -1,0 +1,48 @@
+name: release
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: Run the release workflow without publishing to npm
+        required: true
+        default: true
+        type: boolean
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    environment: npm
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup environment (node + install)
+        uses: ./.github/actions/node-setup
+
+      - name: Build package
+        run: npm run build
+
+      - name: Publish dry run
+        if: ${{ inputs.dry-run }}
+        run: npm publish --access public --dry-run
+
+      - name: Publish to npm
+        if: ${{ !inputs.dry-run }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public
