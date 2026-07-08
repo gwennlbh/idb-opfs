@@ -380,14 +380,8 @@ export const fileSystemDirectoryHandleFactory = async (
   const directories = await IndexedDBMap.create<string, FileSystemDirectoryHandle>(`${id}:directories`);
 
   // @ts-expect-error handle._data exists
-  files.serializer = async (filename, { _data }: { _data: FileData }) => ({
-    id: _data.id,
-    file: new File([_data.content], filename, {
-      lastModified: _data.lastModified,
-    }),
-  });
-
-  files.reviver = async (filename, { id, file }: { id: number; file: File }) => {
+  files.serializer = async (_, handle) => handle._data;
+  files.reviver = async (filename, _data: FileData) => {
     const subpath = [...path, name];
 
     const exists = () => files.has(filename);
@@ -400,19 +394,7 @@ export const fileSystemDirectoryHandleFactory = async (
       await files.set(filename, fileSystemFileHandleFactory(filename, fileData, subpath, exists, ondelete, permissions, onwrite));
     };
 
-    return fileSystemFileHandleFactory(
-      filename,
-      {
-        content: await file.bytes(),
-        lastModified: file.lastModified,
-        id,
-      },
-      subpath,
-      exists,
-      ondelete,
-      permissions,
-      onwrite,
-    );
+    return fileSystemFileHandleFactory(filename, _data, subpath, exists, ondelete, permissions, onwrite);
   };
 
   // @ts-expect-error _data exists
