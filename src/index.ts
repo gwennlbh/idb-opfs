@@ -8,13 +8,13 @@ export interface StorageFactoryOptions extends StorageEstimate {
   requestPermission?: PermissionHandler;
 }
 
-export const storageFactory = ({
+export const storageFactory = async ({
   usage = 0,
   quota = 1024 ** 3,
   queryPermission,
   requestPermission,
-}: StorageFactoryOptions = {}): StorageManager => {
-  const root = fileSystemDirectoryHandleFactory('root', { queryPermission, requestPermission });
+}: StorageFactoryOptions = {}): Promise<StorageManager> => {
+  const root = await fileSystemDirectoryHandleFactory('root', { queryPermission, requestPermission });
 
   return {
     estimate: async (): Promise<StorageEstimate> => {
@@ -38,7 +38,7 @@ export const storageFactory = ({
   };
 };
 
-export const mockOPFS = (): void => {
+export const mockOPFS = async (): Promise<void> => {
   // Navigator was added to Node.js in v21
   if (!('navigator' in globalThis)) {
     Object.defineProperty(globalThis, 'navigator', {
@@ -51,7 +51,7 @@ export const mockOPFS = (): void => {
   if (!globalThis.navigator.storage) {
     Object.defineProperty(globalThis.navigator, 'storage', {
       configurable: true,
-      value: storageFactory(),
+      value: await storageFactory(),
       writable: true,
     });
   }
@@ -59,9 +59,9 @@ export const mockOPFS = (): void => {
   installFileSystemObserver();
 };
 
-export const resetMockOPFS = (options: StorageFactoryOptions = {}): void => {
+export const resetMockOPFS = async (options: StorageFactoryOptions = {}): Promise<void> => {
   // Clear the mock state, e.g., reset the root directory
-  const root = fileSystemDirectoryHandleFactory('root', {
+  const root = await fileSystemDirectoryHandleFactory('root', {
     queryPermission: options.queryPermission,
     requestPermission: options.requestPermission,
   });
@@ -72,7 +72,7 @@ export const resetMockOPFS = (options: StorageFactoryOptions = {}): void => {
   });
 };
 
-// Automatically add to globalThis if imported directly
-if (typeof globalThis !== 'undefined') {
-  mockOPFS();
-}
+// // Automatically add to globalThis if imported directly
+// if (typeof globalThis !== 'undefined') {
+//   void mockOPFS();
+// }

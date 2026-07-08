@@ -1,6 +1,7 @@
 import { isDirectoryHandle, isFileHandle } from './utils';
 import { notifyFileSystemObservers, setFileSystemHandleMetadata } from './observer';
 import type { PermissionHandler } from './types';
+import { IndexedDBMap } from './idbmap';
 
 // This type isn't exported from lib.dom.d.ts, so we duplicate it here
 interface WriteParams {
@@ -19,19 +20,20 @@ const isLegacyWriteParams = (v: unknown): v is LegacyWriteParams =>
 const isArrayBuffer = (v: unknown): v is ArrayBuffer => Object.prototype.toString.call(v) === '[object ArrayBuffer]';
 
 interface FileData {
-  content: Uint8Array;
+  content: Uint8Array<ArrayBuffer>;
   lastModified: number;
   locked?: boolean;
-  id: symbol;
+  id: number;
 }
 
 const fileSystemFileHandleFactory = (
   name: string,
   fileData: FileData,
   path: string[],
-  exists: () => boolean,
-  onRemove?: () => void,
+  exists: () => Promise<boolean>,
+  onRemove?: () => Promise<void>,
   permissions?: { queryPermission?: PermissionHandler; requestPermission?: PermissionHandler },
+  onWrite?: (data: FileData) => Promise<void>,
 ): FileSystemFileHandle => {
   const checkPermission = async (mode: 'read' | 'readwrite' = 'read'): Promise<void> => {
     const perm = await (permissions?.queryPermission?.({ mode }) ?? Promise.resolve('granted' as PermissionState));
@@ -43,6 +45,8 @@ const fileSystemFileHandleFactory = (
   const handle: FileSystemFileHandle = {
     kind: 'file',
     name,
+    // @ts-expect-error needed for serialization into indexeddb
+    _data: fileData,
 
     queryPermission: permissions?.queryPermission ?? (async (): Promise<PermissionState> => 'granted'),
 
@@ -53,25 +57,22 @@ const fileSystemFileHandleFactory = (
       if (!exists()) {
         throw new DOMException('A requested file or directory could not be found at the time an operation was processed.', 'NotFoundError');
       }
-      onRemove?.();
+      await onRemove?.();
       notifyFileSystemObservers('disappeared', null, path);
     },
 
     isSameEntry: async function (this: FileSystemFileHandle, other: FileSystemHandle): Promise<boolean> {
-      return other === this;
+      // @ts-expect-error private property
+      return other._data.id === this._data.id;
     },
 
     getFile: async (): Promise<File> => {
       await checkPermission('read');
-      if (!exists()) {
+      if (!(await exists())) {
         throw new DOMException('A requested file or directory could not be found at the time an operation was processed.', 'NotFoundError');
       }
 
-      // @ts-expect-error - non-standard property used internally for identity during tests
-      const f = new File([fileData.content], name, { lastModified: fileData.lastModified });
-      // @ts-expect-error - attach internal id for isSameEntry in mock-only environment
-      f._opfsId = fileData.id;
-      return f as File;
+      return new File([fileData.content], name, { lastModified: fileData.lastModified });
     },
 
     createWritable: async (options?: FileSystemCreateWritableOptions): Promise<FileSystemWritableFileStream> => {
@@ -202,6 +203,10 @@ const fileSystemFileHandleFactory = (
         isClosed = true;
         fileData.content = content;
         fileData.lastModified = Date.now();
+
+        // Needed to sync changes back to IndexedDB
+        await onWrite?.(fileData);
+
         notifyFileSystemObservers('modified', handle, path);
       };
 
@@ -257,6 +262,8 @@ const fileSystemFileHandleFactory = (
         throw new DOMException('A sync access handle is already open for this file', 'InvalidStateError');
       }
       fileData.locked = true;
+      await onWrite?.(fileData);
+
       let closed = false;
 
       const syncHandle: FileSystemSyncAccessHandle = {
@@ -317,6 +324,8 @@ const fileSystemFileHandleFactory = (
 
           fileData.lastModified = Date.now();
           notifyFileSystemObservers('modified', syncHandle, path);
+          // TODO: what do we do here?
+          void onWrite?.(fileData);
           return writeLength;
         },
 
@@ -334,6 +343,8 @@ const fileSystemFileHandleFactory = (
           }
           fileData.lastModified = Date.now();
           notifyFileSystemObservers('modified', syncHandle, path);
+          // TODO: what do we do here?
+          void onWrite?.(fileData);
         },
 
         flush: async (): Promise<void> => {
@@ -345,6 +356,7 @@ const fileSystemFileHandleFactory = (
         close: async (): Promise<void> => {
           closed = true;
           fileData.locked = false;
+          await onWrite?.(fileData);
         },
       };
       setFileSystemHandleMetadata(syncHandle, path);
@@ -355,18 +367,66 @@ const fileSystemFileHandleFactory = (
   return handle;
 };
 
-export const fileSystemDirectoryHandleFactory = (
+export const fileSystemDirectoryHandleFactory = async (
   name: string,
   permissions?: { queryPermission?: PermissionHandler; requestPermission?: PermissionHandler },
   onRemove?: () => void,
   path: string[] = [],
-): FileSystemDirectoryHandle => {
-  const files = new Map<string, FileSystemFileHandle>();
-  const directories = new Map<string, FileSystemDirectoryHandle>();
+  id?: number,
+): Promise<FileSystemDirectoryHandle> => {
+  id ??= Math.round(Math.random() * 1e12);
 
-  const getJoinedMaps = (): Map<string, FileSystemHandle> => {
-    return new Map<string, FileSystemHandle>([...files, ...directories]);
+  const files = await IndexedDBMap.create<string, FileSystemFileHandle>(`${id}:files`);
+  const directories = await IndexedDBMap.create<string, FileSystemDirectoryHandle>(`${id}:directories`);
+
+  // @ts-expect-error handle._data exists
+  files.serializer = async (filename, { _data }: { _data: FileData }) => ({
+    id: _data.id,
+    file: new File([_data.content], filename, {
+      lastModified: _data.lastModified,
+    }),
+  });
+
+  files.reviver = async (filename, { id, file }: { id: number; file: File }) => {
+    const subpath = [...path, name];
+
+    const exists = () => files.has(filename);
+
+    const ondelete = async () => {
+      await files.delete(filename);
+    };
+
+    const onwrite = async (fileData: FileData) => {
+      await files.set(filename, fileSystemFileHandleFactory(filename, fileData, subpath, exists, ondelete, permissions, onwrite));
+    };
+
+    return fileSystemFileHandleFactory(
+      filename,
+      {
+        content: await file.bytes(),
+        lastModified: file.lastModified,
+        id,
+      },
+      subpath,
+      exists,
+      ondelete,
+      permissions,
+      onwrite,
+    );
   };
+
+  // @ts-expect-error _data exists
+  directories.serializer = async (_, { _data }) => _data.id;
+  directories.reviver = async (dirname, id) =>
+    fileSystemDirectoryHandleFactory(
+      dirname,
+      permissions,
+      async () => {
+        await directories.delete(dirname);
+      },
+      [...path, name],
+      id,
+    );
 
   const checkPermission = async (mode: 'read' | 'readwrite' = 'read'): Promise<void> => {
     const perm = await (permissions?.queryPermission?.({ mode }) ?? Promise.resolve('granted' as PermissionState));
@@ -378,6 +438,8 @@ export const fileSystemDirectoryHandleFactory = (
   const handle: FileSystemDirectoryHandle = {
     kind: 'directory',
     name,
+    // @ts-expect-error needed for isSameEntry check
+    _data: { id },
 
     // Permissions stubs
     queryPermission: permissions?.queryPermission ?? (async (): Promise<PermissionState> => 'granted'),
@@ -406,31 +468,41 @@ export const fileSystemDirectoryHandleFactory = (
     },
 
     isSameEntry: async function (this: FileSystemDirectoryHandle, other: FileSystemHandle): Promise<boolean> {
-      return other === this;
+      // @ts-expect-error internal property
+      return this._data.id === other._data.id;
     },
 
     getFileHandle: async (fileName: string, options?: { create?: boolean }) => {
-      if (directories.has(fileName)) {
+      if (await directories.has(fileName)) {
         throw new DOMException(`A directory with the same name exists: ${fileName}`, 'TypeMismatchError');
       }
-      if (!files.has(fileName) && options?.create) {
+      if (!(await files.has(fileName)) && options?.create) {
         await checkPermission('readwrite');
-        files.set(
+
+        const data = {
+          content: new Uint8Array(),
+          lastModified: Date.now(),
+          id: Math.round(Math.random() * 1e12),
+        };
+
+        const handle = fileSystemFileHandleFactory(
           fileName,
-          fileSystemFileHandleFactory(
-            fileName,
-            { content: new Uint8Array(), lastModified: Date.now(), id: Symbol('file') },
-            [...path, fileName],
-            () => files.has(fileName),
-            () => files.delete(fileName),
-            permissions,
-          ),
+          data,
+          [...path, fileName],
+          async () => files.has(fileName),
+          async () => {
+            await files.delete(fileName);
+          },
+          permissions,
         );
-        notifyFileSystemObservers('appeared', files.get(fileName) ?? null, [...path, fileName]);
+
+        await files.set(fileName, handle);
+
+        notifyFileSystemObservers('appeared', handle, [...path, fileName]);
       } else {
         await checkPermission('read');
       }
-      const fileHandle = files.get(fileName);
+      const fileHandle = await files.get(fileName);
       if (!fileHandle) {
         throw new DOMException(`File not found: ${fileName}`, 'NotFoundError');
       }
@@ -438,18 +510,29 @@ export const fileSystemDirectoryHandleFactory = (
     },
 
     getDirectoryHandle: async (dirName: string, options?: { create?: boolean }): Promise<FileSystemDirectoryHandle> => {
-      if (files.has(dirName)) {
+      if (await files.has(dirName)) {
         throw new DOMException(`A file with the same name exists: ${dirName}`, 'TypeMismatchError');
       }
-      if (!directories.has(dirName) && options?.create) {
+      if (!(await directories.has(dirName)) && options?.create) {
         await checkPermission('readwrite');
-        const dir = fileSystemDirectoryHandleFactory(dirName, permissions, () => directories.delete(dirName), [...path, dirName]);
-        directories.set(dirName, dir);
+
+        const dir = await fileSystemDirectoryHandleFactory(
+          dirName,
+          permissions,
+          async () => {
+            directories.delete(dirName);
+          },
+          [...path, dirName],
+        );
+
+        await directories.set(dirName, dir);
+
         notifyFileSystemObservers('appeared', dir, [...path, dirName]);
       } else {
         await checkPermission('read');
       }
-      const directoryHandle = directories.get(dirName);
+
+      const directoryHandle = await directories.get(dirName);
       if (!directoryHandle) {
         throw new DOMException(`Directory not found: ${dirName}`, 'NotFoundError');
       }
@@ -458,12 +541,12 @@ export const fileSystemDirectoryHandleFactory = (
 
     removeEntry: async (entryName: string, options?: FileSystemRemoveOptions): Promise<void> => {
       await checkPermission('readwrite');
-      if (files.has(entryName)) {
-        files.delete(entryName);
+      if (await files.has(entryName)) {
+        await files.delete(entryName);
         notifyFileSystemObservers('disappeared', null, [...path, entryName]);
         return;
       }
-      const dir = directories.get(entryName);
+      const dir = await directories.get(entryName);
       if (dir) {
         // Check emptiness if not recursive
         if (!options?.recursive) {
@@ -473,7 +556,7 @@ export const fileSystemDirectoryHandleFactory = (
             throw new DOMException('The directory is not empty', 'InvalidModificationError');
           }
         }
-        directories.delete(entryName);
+        await directories.delete(entryName);
         notifyFileSystemObservers('disappeared', null, [...path, entryName]);
         return;
       }
@@ -484,33 +567,26 @@ export const fileSystemDirectoryHandleFactory = (
       [string, FileSystemDirectoryHandle | FileSystemFileHandle]
     > {
       await checkPermission('read');
-      const entries = getJoinedMaps();
-      for (const [n, h] of entries) {
-        yield [n, h as FileSystemDirectoryHandle | FileSystemFileHandle];
-      }
+      yield* this.entries();
       return undefined;
     },
 
     entries: async function* (): FileSystemDirectoryHandleAsyncIterator<[string, FileSystemDirectoryHandle | FileSystemFileHandle]> {
       await checkPermission('read');
-      const joinedMaps = getJoinedMaps();
-      for (const [n, h] of joinedMaps.entries()) {
-        yield [n, h as FileSystemDirectoryHandle | FileSystemFileHandle];
-      }
+      yield* files.entries();
+      yield* directories.entries();
     },
 
     keys: async function* (): FileSystemDirectoryHandleAsyncIterator<string> {
       await checkPermission('read');
-      const joinedMaps = getJoinedMaps();
-      yield* joinedMaps.keys();
+      yield* files.keys();
+      yield* directories.keys();
     },
 
     values: async function* (): FileSystemDirectoryHandleAsyncIterator<FileSystemDirectoryHandle | FileSystemFileHandle> {
       await checkPermission('read');
-      const joinedMaps = getJoinedMaps();
-      for (const h of joinedMaps.values()) {
-        yield h as FileSystemDirectoryHandle | FileSystemFileHandle;
-      }
+      yield* files.values();
+      yield* directories.values();
     },
 
     resolve: async function (possibleDescendant: FileSystemHandle): Promise<string[] | null> {

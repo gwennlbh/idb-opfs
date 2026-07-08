@@ -1,9 +1,12 @@
+import 'fake-indexeddb/auto';
+
 import { beforeEach, describe, expect, test } from 'vitest';
 import { mockOPFS, resetMockOPFS, storageFactory } from './index';
 
 describe('OPFS', () => {
-  beforeEach(() => {
-    resetMockOPFS();
+  beforeEach(async () => {
+    await mockOPFS();
+    await resetMockOPFS();
   });
 
   test('should have getDirectory function available', async () => {
@@ -545,20 +548,20 @@ describe('OPFS', () => {
   });
 
   test('should return default quota and usage', async () => {
-    const storage = storageFactory();
+    const storage = await storageFactory();
     const estimate = await storage.estimate();
     expect(estimate.quota).toBe(1024 * 1024 * 1024); // 1GB
     expect(estimate.usage).toBe(0);
   });
 
   test('should include predefined usage', async () => {
-    const storage = storageFactory({ usage: 5000 });
+    const storage = await storageFactory({ usage: 5000 });
     const estimate = await storage.estimate();
     expect(estimate.usage).toBeGreaterThanOrEqual(5000);
   });
 
   test('should reflect directory size in usage estimate', async () => {
-    const storage = storageFactory();
+    const storage = await storageFactory();
     const rootDir = await storage.getDirectory();
     const fileHandle = await rootDir.getFileHandle('testFile.txt', { create: true });
     const writer = await fileHandle.createWritable();
@@ -571,7 +574,7 @@ describe('OPFS', () => {
   });
 
   test('should allow writing after an aborted stream is closed and reopened', async () => {
-    const storage = storageFactory();
+    const storage = await storageFactory();
     const rootDir = await storage.getDirectory();
     const fileHandle = await rootDir.getFileHandle('reopenTest.txt', { create: true });
     let writer = await fileHandle.createWritable();
@@ -588,7 +591,7 @@ describe('OPFS', () => {
   });
 
   test('should verify that abort does not affect existing file content', async () => {
-    const storage = storageFactory();
+    const storage = await storageFactory();
     const rootDir = await storage.getDirectory();
     const fileHandle = await rootDir.getFileHandle('persistedContent.txt', { create: true });
     let writer = await fileHandle.createWritable();
@@ -604,7 +607,7 @@ describe('OPFS', () => {
   });
 
   test('should not allow closing an already closed writable stream', async () => {
-    const storage = storageFactory();
+    const storage = await storageFactory();
     const rootDir = await storage.getDirectory();
     const fileHandle = await rootDir.getFileHandle('doubleCloseTest.txt', { create: true });
     const writer = await fileHandle.createWritable();
@@ -615,7 +618,7 @@ describe('OPFS', () => {
   });
 
   test('should allow closing an unwritten writable stream', async () => {
-    const storage = storageFactory();
+    const storage = await storageFactory();
     const rootDir = await storage.getDirectory();
     const fileHandle = await rootDir.getFileHandle('emptyClose.txt', { create: true });
     const writer = await fileHandle.createWritable();
@@ -1164,7 +1167,7 @@ describe('OPFS', () => {
   });
 
   test('getFileHandle rejects with NotFoundError when file is missing', async () => {
-    const storage = storageFactory();
+    const storage = await storageFactory();
     const rootDir = await storage.getDirectory();
 
     // call once and assert the rejection details
@@ -1393,7 +1396,7 @@ describe('OPFS', () => {
     // Since isSameEntry compares handle identity (===), use it where available
     expect(await a1.isSameEntry(a2)).toBe(true);
 
-    resetMockOPFS();
+    await resetMockOPFS();
     const b = await navigator.storage.getDirectory();
     expect(await a1.isSameEntry(b)).toBe(false);
   });
@@ -1570,7 +1573,7 @@ describe('OPFS', () => {
   });
 
   test('StorageManager.estimate aggregates usage and respects base usage/quota', async () => {
-    const storage = storageFactory({ usage: 100, quota: 12345 });
+    const storage = await storageFactory({ usage: 100, quota: 12345 });
     const root = await storage.getDirectory();
     const fh = await root.getFileHandle('u.txt', { create: true });
     const ws = await fh.createWritable();
@@ -1616,7 +1619,7 @@ describe('OPFS', () => {
 
   test('methods throw NotAllowedError when permission is denied', async () => {
     let mode: 'read' | 'readwrite' = 'read';
-    resetMockOPFS({
+    await resetMockOPFS({
       queryPermission: async (desc) => {
         if (desc?.mode === 'readwrite' && mode === 'read') return 'denied';
         return 'granted';
@@ -1645,7 +1648,7 @@ describe('OPFS', () => {
   });
 
   test('directory iteration and resolve throw NotAllowedError when read permission is denied', async () => {
-    resetMockOPFS({
+    await resetMockOPFS({
       queryPermission: async () => 'denied',
     });
 
@@ -1670,7 +1673,7 @@ describe('OPFS', () => {
     const queryPermission = async () => 'prompt' as PermissionState;
     const requestPermission = async () => 'denied' as PermissionState;
 
-    const storage = storageFactory({ queryPermission, requestPermission });
+    const storage = await storageFactory({ queryPermission, requestPermission });
     const root = await storage.getDirectory();
 
     // creation will fail because prompt !== granted
@@ -1681,7 +1684,7 @@ describe('OPFS', () => {
   });
 
   test('resetMockOPFS can also take custom permissions', async () => {
-    resetMockOPFS({
+    await resetMockOPFS({
       queryPermission: async () => 'denied',
     });
 
@@ -1690,14 +1693,14 @@ describe('OPFS', () => {
   });
 
   test('storage persist APIs resolve true', async () => {
-    const storage = storageFactory();
+    const storage = await storageFactory();
 
     await expect(storage.persist()).resolves.toBe(true);
     await expect(storage.persisted()).resolves.toBe(true);
   });
 
   test('storage estimate includes nested directory file usage', async () => {
-    const storage = storageFactory({ usage: 10, quota: 999 });
+    const storage = await storageFactory({ usage: 10, quota: 999 });
     const root = await storage.getDirectory();
     const nested = await root.getDirectoryHandle('nested', { create: true });
     const fh = await nested.getFileHandle('nested.txt', { create: true });
@@ -1787,7 +1790,7 @@ describe('OPFS', () => {
 
   test('mockOPFS preserves an existing navigator.storage object', async () => {
     const originalStorage = globalThis.navigator.storage;
-    const storage = storageFactory({ quota: 321 });
+    const storage = await storageFactory({ quota: 321 });
 
     try {
       Object.assign(globalThis.navigator, { storage });
@@ -1811,7 +1814,7 @@ describe('OPFS', () => {
     // @ts-expect-error deleting navigator is intentional for bootstrap coverage
     delete globalThis.navigator;
 
-    mockOPFS();
+    await mockOPFS();
 
     expect(globalThis.navigator).toBeDefined();
     expect(Object.getOwnPropertyDescriptor(globalThis, 'navigator')?.configurable).toBe(true);

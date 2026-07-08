@@ -1,17 +1,20 @@
 {
-  "name": "opfs-mock",
-  "version": "2.7.0",
+  "name": "idb-opfs",
+  "version": "0.1.0",
   "type": "module",
-  "description": "Mock all origin private file system APIs for your Jest or Vitest tests",
-  "author": "Jure Rotar <hello@jurerotar.com>",
+  "description": "Replace navigator.storage.getDirectory() with a IndexedBD-backed OPFS implementation. Based on opfs-mock.",
+  "contributors": [
+    "Gwenn Le Bihan <gwenn.lebihan7@gmail.com>",
+    "Jure Rotar <hello@jurerotar.com>"
+  ],
   "license": "MIT",
-  "homepage": "https://github.com/jurerotar/opfs-mock#readme",
+  "homepage": "https://github.com/gwennlbh/idb-opfs#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/jurerotar/opfs-mock.git"
+    "url": "git+https://github.com/gwennlbh/idb-opfs.git"
   },
   "bugs": {
-    "url": "https://github.com/jurerotar/opfs-mock/issues"
+    "url": "https://github.com/gwennlbh/idb-opfs/issues"
   },
   "keywords": [
     "vitest",
@@ -64,10 +67,14 @@
     "@typescript/native-preview": "7.0.0-dev.20260522.1",
     "@vitest/coverage-v8": "4.1.7",
     "@web-std/file": "3.0.3",
+    "fake-indexeddb": "^6.2.5",
     "happy-dom": "20.9.0",
     "jsdom": "29.1.1",
     "tsdown": "0.22.0",
     "typescript": "6.0.3",
     "vitest": "4.1.7"
+  },
+  "dependencies": {
+    "idb": "^8.0.3"
   }
 }
