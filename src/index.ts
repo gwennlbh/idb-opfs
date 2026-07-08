@@ -35,7 +35,11 @@ export const storageFactory = async ({
         continue;
       }
 
-      for (const store in db.objectStoreNames) {
+      // objectStoreNames is a DOMStringList, it's not iterable
+      for (let i = 0; i < db.objectStoreNames.length; i++) {
+        const store = db.objectStoreNames[i];
+        if (!store) continue;
+
         log(`idb store ${store}@${name}:`);
         try {
           for (const item of await db.getAll(store)) {
