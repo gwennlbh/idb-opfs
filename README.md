@@ -2,9 +2,9 @@
 
 IndexedDB-backed implementation of the [origin private file system](https://developer.mozilla.org/en-US/docs/Web/API/File_System_API/Origin_private_file_system).
 
-Motivation for the creation of this monster is to get around the [unavailability of OPFS in Playwright's WebKit Build]().
+Motivation for the creation of this monster is to get around the [unavailability of OPFS in Playwright's WebKit Build](https://github.com/microsoft/playwright/issues/18235).
 
-Simply using a in-memory OPFS implementation does not suffice in that case, since OPFS is shared between the main thread and [Web Workers]().
+Simply using a in-memory OPFS implementation does not suffice in that case, since OPFS is shared between the main thread and Web Workers.
 
 The only built-in Web API that offers a read/write storage that's shared between web workers and the main thread is (afaik) IndexedDB.
 
