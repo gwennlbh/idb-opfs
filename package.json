@@ -1,6 +1,6 @@
 {
   "name": "idb-opfs",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "module",
   "description": "Replace navigator.storage.getDirectory() with a IndexedBD-backed OPFS implementation. Based on opfs-mock.",
   "contributors": [

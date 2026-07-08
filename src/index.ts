@@ -27,11 +27,23 @@ export const storageFactory = async ({
     log('debug: list of idb tables');
     for (const { name } of await indexedDB.databases()) {
       if (!name) continue;
-      const db = await openDB(name);
+
+      const db = await openDB(name).catch((error) => ({ error }));
+      if ('error' in db) {
+        log(`debug: couldnt open database ${name}:`);
+        log(db.error);
+        continue;
+      }
+
       for (const store in db.objectStoreNames) {
         log(`idb store ${store}@${name}:`);
-        for (const item of await db.getAll(store)) {
-          log(`- ${item.key}: #${item.value.id} ${item.value.locked ? 'LOCKED' : ''}`);
+        try {
+          for (const item of await db.getAll(store)) {
+            log(`- ${item.key}: #${item.value.id} ${item.value.locked ? 'LOCKED' : ''}`);
+          }
+        } catch (error) {
+          log(`- couldnt get items for this store:`);
+          log(error);
         }
       }
     }
