@@ -34,6 +34,8 @@ export class IndexedDBMap<K extends string, V> {
       },
     });
 
+    db.addEventListener('versionchange', () => db.close());
+
     const instance = new IndexedDBMap<K, V>(db, objectStoreName);
 
     for (const iter of init) {

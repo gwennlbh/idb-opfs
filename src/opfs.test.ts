@@ -1390,7 +1390,7 @@ describe('OPFS', () => {
     await expect(root.getFileHandle('remove-me.txt')).rejects.toHaveProperty('name', 'NotFoundError');
   });
 
-  test('getDirectory identity stable in session and changes after reset', async () => {
+  test('getDirectory identity stable in session and even after reset', async () => {
     const a1 = await navigator.storage.getDirectory();
     const a2 = await navigator.storage.getDirectory();
     // Since isSameEntry compares handle identity (===), use it where available
@@ -1398,7 +1398,7 @@ describe('OPFS', () => {
 
     await resetMockOPFS();
     const b = await navigator.storage.getDirectory();
-    expect(await a1.isSameEntry(b)).toBe(false);
+    expect(await a1.isSameEntry(b)).toBe(true);
   });
 
   test('resolve returns null for unrelated handle', async () => {

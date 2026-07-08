@@ -2,6 +2,8 @@ import { fileSystemDirectoryHandleFactory } from './opfs';
 import { installFileSystemObserver } from './observer';
 import { getSizeOfDirectory } from './utils';
 import type { PermissionHandler } from './types';
+import { IDB_DATABASE_NAME } from './idbmap';
+import { deleteDB } from 'idb';
 
 export interface StorageFactoryOptions extends StorageEstimate {
   queryPermission?: PermissionHandler;
@@ -60,6 +62,13 @@ export const mockOPFS = async (): Promise<void> => {
 };
 
 export const resetMockOPFS = async (options: StorageFactoryOptions = {}): Promise<void> => {
+  for (const db of await indexedDB.databases()) {
+    if (!db.name) continue;
+    if (db.name.startsWith(IDB_DATABASE_NAME)) {
+      await deleteDB(db.name);
+    }
+  }
+
   // Clear the mock state, e.g., reset the root directory
   const root = await fileSystemDirectoryHandleFactory(
     'root',
