@@ -6,6 +6,9 @@ const config: UserConfig = defineConfig({
   format: ['esm'],
   dts: true,
   clean: true,
+  deps: {
+    alwaysBundle: ['idb'],
+  },
 });
 
 export default config;
