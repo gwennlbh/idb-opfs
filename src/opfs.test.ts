@@ -5,7 +5,7 @@ import { mockOPFS, resetMockOPFS, storageFactory } from './index';
 
 describe('OPFS', () => {
   beforeEach(async () => {
-    await mockOPFS();
+    await mockOPFS({ debug: true });
     await resetMockOPFS();
   });
 

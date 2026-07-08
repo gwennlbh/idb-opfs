@@ -50,6 +50,8 @@ export const storageFactory = async ({
           log(error);
         }
       }
+
+      db.close();
     }
   }
 
