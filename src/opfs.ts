@@ -373,6 +373,7 @@ export const fileSystemDirectoryHandleFactory = async (
   onRemove?: () => void,
   path: string[] = [],
   id?: number,
+  log: (...args: unknown[]) => void = () => {},
 ): Promise<FileSystemDirectoryHandle> => {
   id ??= Math.round(Math.random() * 1e12);
 
@@ -408,6 +409,7 @@ export const fileSystemDirectoryHandleFactory = async (
       },
       [...path, name],
       id,
+      log,
     );
 
   const checkPermission = async (mode: 'read' | 'readwrite' = 'read'): Promise<void> => {
@@ -467,6 +469,8 @@ export const fileSystemDirectoryHandleFactory = async (
           id: Math.round(Math.random() * 1e12),
         };
 
+        log('getFileHandle: creating file', data);
+
         const handle = fileSystemFileHandleFactory(
           fileName,
           data,
@@ -505,6 +509,8 @@ export const fileSystemDirectoryHandleFactory = async (
             directories.delete(dirName);
           },
           [...path, dirName],
+          undefined,
+          log,
         );
 
         await directories.set(dirName, dir);

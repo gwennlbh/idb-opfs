@@ -1,3 +1,5 @@
+import type { StorageFactoryOptions } from '.';
+
 export const isFileHandle = (handle: FileSystemHandle): handle is FileSystemFileHandle => {
   return handle.kind === 'file';
 };
@@ -19,4 +21,11 @@ export const getSizeOfDirectory = async (directory: FileSystemDirectoryHandle): 
   }
 
   return totalSize;
+};
+
+export const makeLogger = ({ debug = false }: Pick<StorageFactoryOptions, 'debug'>): ((...args: unknown[]) => void) => {
+  if (!debug) return () => {};
+
+  // biome-ignore lint/suspicious/noConsole: for explicit user debugging purposes
+  return (...args) => console.debug('[idb-opfs]', ...args);
 };

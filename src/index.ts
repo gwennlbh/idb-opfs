@@ -1,6 +1,6 @@
 import { fileSystemDirectoryHandleFactory } from './opfs';
 import { installFileSystemObserver } from './observer';
-import { getSizeOfDirectory } from './utils';
+import { getSizeOfDirectory, makeLogger } from './utils';
 import type { PermissionHandler } from './types';
 import { IDB_DATABASE_NAME } from './idbmap';
 import { deleteDB, openDB } from 'idb';
@@ -18,18 +18,11 @@ export const storageFactory = async ({
   requestPermission,
   debug = false,
 }: StorageFactoryOptions = {}): Promise<StorageManager> => {
-  const root = await fileSystemDirectoryHandleFactory(
-    'root',
-    { queryPermission, requestPermission },
-    undefined,
-    undefined,
-    0,
-  );
+  const log = makeLogger({ debug });
+
+  const root = await fileSystemDirectoryHandleFactory('root', { queryPermission, requestPermission }, undefined, undefined, 0, log);
 
   if (debug) {
-    // biome-ignore lint/suspicious/noConsole: we're debugging here
-    const log = (...args: unknown[]) => console.debug('[idb-opfs]', ...args);
-
     log('debug: list of idb tables');
     for (const { name } of await indexedDB.databases()) {
       if (!name) continue;
@@ -125,6 +118,7 @@ export const resetMockOPFS = async (options: StorageFactoryOptions = {}): Promis
     // Important, so that when opening the root on e.g. another thread
     // we get the same data
     0,
+    makeLogger(options),
   );
   Object.defineProperty(globalThis.navigator.storage, 'getDirectory', {
     configurable: true,
