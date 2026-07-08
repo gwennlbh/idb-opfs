@@ -27,6 +27,7 @@ export const storageFactory = async ({
     log('debug: list of idb tables');
     for (const { name } of await indexedDB.databases()) {
       if (!name) continue;
+      if (!name.startsWith(IDB_DATABASE_NAME)) continue;
 
       const db = await openDB(name).catch((error) => ({ error }));
       if ('error' in db) {
