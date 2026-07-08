@@ -3,11 +3,12 @@ import { installFileSystemObserver } from './observer';
 import { getSizeOfDirectory } from './utils';
 import type { PermissionHandler } from './types';
 import { IDB_DATABASE_NAME } from './idbmap';
-import { deleteDB } from 'idb';
+import { deleteDB, openDB } from 'idb';
 
 export interface StorageFactoryOptions extends StorageEstimate {
   queryPermission?: PermissionHandler;
   requestPermission?: PermissionHandler;
+  debug?: boolean;
 }
 
 export const storageFactory = async ({
@@ -15,8 +16,26 @@ export const storageFactory = async ({
   quota = 1024 ** 3,
   queryPermission,
   requestPermission,
+  debug = false,
 }: StorageFactoryOptions = {}): Promise<StorageManager> => {
   const root = await fileSystemDirectoryHandleFactory('root', { queryPermission, requestPermission });
+
+  if (debug) {
+    // biome-ignore lint/suspicious/noConsole: we're debugging here
+    const log = (...args: unknown[]) => console.debug('[idb-opfs]', ...args);
+
+    log('debug: list of idb tables');
+    for (const { name } of await indexedDB.databases()) {
+      if (!name) continue;
+      const db = await openDB(name);
+      for (const store in db.objectStoreNames) {
+        log(`idb store ${store}@${name}:`);
+        for (const item of await db.getAll(store)) {
+          log(`- ${item.key}: #${item.value.id} ${item.value.locked ? 'LOCKED' : ''}`);
+        }
+      }
+    }
+  }
 
   return {
     estimate: async (): Promise<StorageEstimate> => {
@@ -40,7 +59,7 @@ export const storageFactory = async ({
   };
 };
 
-export const mockOPFS = async (): Promise<void> => {
+export const mockOPFS = async (options: StorageFactoryOptions): Promise<void> => {
   // Navigator was added to Node.js in v21
   if (!('navigator' in globalThis)) {
     Object.defineProperty(globalThis, 'navigator', {
@@ -53,7 +72,7 @@ export const mockOPFS = async (): Promise<void> => {
   if (!globalThis.navigator.storage) {
     Object.defineProperty(globalThis.navigator, 'storage', {
       configurable: true,
-      value: await storageFactory(),
+      value: await storageFactory(options),
       writable: true,
     });
   }
