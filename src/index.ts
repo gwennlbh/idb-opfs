@@ -78,7 +78,7 @@ export const storageFactory = async ({
   };
 };
 
-export const mockOPFS = async (options: StorageFactoryOptions): Promise<void> => {
+export const mockOPFS = async (options?: StorageFactoryOptions): Promise<void> => {
   // Navigator was added to Node.js in v21
   if (!('navigator' in globalThis)) {
     Object.defineProperty(globalThis, 'navigator', {
