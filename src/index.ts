@@ -18,7 +18,13 @@ export const storageFactory = async ({
   requestPermission,
   debug = false,
 }: StorageFactoryOptions = {}): Promise<StorageManager> => {
-  const root = await fileSystemDirectoryHandleFactory('root', { queryPermission, requestPermission });
+  const root = await fileSystemDirectoryHandleFactory(
+    'root',
+    { queryPermission, requestPermission },
+    undefined,
+    undefined,
+    0,
+  );
 
   if (debug) {
     // biome-ignore lint/suspicious/noConsole: we're debugging here
