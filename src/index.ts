@@ -61,10 +61,18 @@ export const mockOPFS = async (): Promise<void> => {
 
 export const resetMockOPFS = async (options: StorageFactoryOptions = {}): Promise<void> => {
   // Clear the mock state, e.g., reset the root directory
-  const root = await fileSystemDirectoryHandleFactory('root', {
-    queryPermission: options.queryPermission,
-    requestPermission: options.requestPermission,
-  });
+  const root = await fileSystemDirectoryHandleFactory(
+    'root',
+    {
+      queryPermission: options.queryPermission,
+      requestPermission: options.requestPermission,
+    },
+    undefined,
+    undefined,
+    // Important, so that when opening the root on e.g. another thread
+    // we get the same data
+    0,
+  );
   Object.defineProperty(globalThis.navigator.storage, 'getDirectory', {
     configurable: true,
     value: () => root,
